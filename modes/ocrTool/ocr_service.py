@@ -1,11 +1,14 @@
 """OCR服务模块"""
 
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 from rapidocr import EngineType, LangDet, LangRec, ModelType, OCRVersion, RapidOCR
+
+from modes.imageTool import image_service
 
 
 class OCRService:
@@ -34,24 +37,40 @@ class OCRService:
         )
 
     def detect_characters(
-        self, image_path: str | Path
-    ) -> List[Tuple[List[List[float]], str, float]]:
+        self, image_path: str | Path, max_side: int = 2000
+    ) -> tuple[List[Tuple[List[List[float]], str, float]], np.ndarray, float]:
         """
         使用OCR的det步骤，获取图像中所有"单个字"的定位框
 
         Args:
             image_path: 输入图像路径
+            max_side: 最长边的最大像素值，默认2000
 
         Returns:
-            检测结果列表，每个元素为 (box坐标, 识别文本, 置信度)
+            (检测结果列表, 缩放后的图像, 缩放比例)
+            检测结果列表每个元素为 (box坐标, 识别文本, 置信度)
             box格式: [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
         """
         image_path = Path(image_path)
         if not image_path.exists():
             raise FileNotFoundError(f"图像文件不存在: {image_path}")
 
-        # 使用单字级别OCR (return_word_box=True)
-        ocr_result = self.ocr_engine(str(image_path), return_word_box=True)
+        # 先缩放图像至最长边不超过max_side
+        resized_image, scale = image_service.resize_image_by_max_side(
+            image_path, max_side=max_side
+        )
+
+        # 保存缩放后的图像到临时文件
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            cv2.imwrite(str(tmp_path), resized_image)
+
+        try:
+            # 使用单字级别OCR (return_word_box=True) 对缩放后的图像进行OCR
+            ocr_result = self.ocr_engine(str(tmp_path), return_word_box=True)
+        finally:
+            # 清理临时文件
+            tmp_path.unlink(missing_ok=True)
 
         # 处理单字级别结果
         word_results = []
@@ -144,24 +163,33 @@ class OCRService:
         # 如果没有word_results，回退到行级别OCR
         if not word_results:
             # 行级别OCR
-            ocr_result = self.ocr_engine(str(image_path))
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+                tmp_path = Path(tmp_file.name)
+                cv2.imwrite(str(tmp_path), resized_image)
 
-            # 处理不同的返回格式
-            if hasattr(ocr_result, "boxes"):
-                # 新格式: RapidOCROutput对象
-                result = list(zip(ocr_result.boxes, ocr_result.txts, ocr_result.scores))
-            else:
-                # 旧格式: tuple (result, _)
-                result, _ = ocr_result
+            try:
+                ocr_result = self.ocr_engine(str(tmp_path))
 
-            for item in result:
-                if isinstance(item, (list, tuple)) and len(item) >= 3:
-                    dt_box = item[0]
-                    text = item[1]
-                    confidence = item[2]
-                    word_results.append((dt_box, text, float(confidence)))
+                # 处理不同的返回格式
+                if hasattr(ocr_result, "boxes"):
+                    # 新格式: RapidOCROutput对象
+                    result = list(
+                        zip(ocr_result.boxes, ocr_result.txts, ocr_result.scores)
+                    )
+                else:
+                    # 旧格式: tuple (result, _)
+                    result, _ = ocr_result
 
-        return word_results
+                for item in result:
+                    if isinstance(item, (list, tuple)) and len(item) >= 3:
+                        dt_box = item[0]
+                        text = item[1]
+                        confidence = item[2]
+                        word_results.append((dt_box, text, float(confidence)))
+            finally:
+                tmp_path.unlink(missing_ok=True)
+
+        return word_results, resized_image, scale
 
     def recognize_character(
         self, image: np.ndarray, box: List[List[float]]
@@ -219,7 +247,8 @@ class OCRService:
         image_path: str | Path,
         output_dir: Optional[str | Path] = None,
         save_images: bool = True,
-    ) -> List[Dict[str, Any]]:
+        max_side: int = 2000,
+    ) -> tuple[List[Dict[str, Any]], np.ndarray, float]:
         """
         提取图像中所有单个字符的图像
 
@@ -227,9 +256,11 @@ class OCRService:
             image_path: 输入图像路径
             output_dir: 输出目录，如果为None则不保存图像
             save_images: 是否保存字符图像，默认True
+            max_side: 最长边的最大像素值，默认2000
 
         Returns:
-            字符信息列表，每个元素包含:
+            (字符信息列表, 缩放后的图像, 缩放比例)
+            字符信息列表每个元素包含:
             {
                 'box': [[x1,y1], [x2,y2], [x3,y3], [x4,y4]],
                 'text': '识别文本',
@@ -242,13 +273,8 @@ class OCRService:
         if not image_path.exists():
             raise FileNotFoundError(f"图像文件不存在: {image_path}")
 
-        # 读取原始图像
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"无法读取图像文件: {image_path}")
-
-        # 检测所有字符
-        det_results = self.detect_characters(image_path)
+        # 检测所有字符（会自动缩放图像）
+        det_results, resized_image, scale = self.detect_characters(image_path, max_side)
 
         output_dir = Path(output_dir) if output_dir else None
         if save_images and output_dir:
@@ -263,14 +289,14 @@ class OCRService:
             x_min, x_max = int(min(x_coords)), int(max(x_coords))
             y_min, y_max = int(min(y_coords)), int(max(y_coords))
 
-            # 确保坐标在图像范围内
-            h, w = image.shape[:2]
+            # 确保坐标在图像范围内（使用缩放后的图像）
+            h, w = resized_image.shape[:2]
             x_min = max(0, min(x_min, w - 1))
             y_min = max(0, min(y_min, h - 1))
             x_max = max(x_min + 1, min(x_max, w))
             y_max = max(y_min + 1, min(y_max, h))
 
-            char_image = image[y_min:y_max, x_min:x_max]
+            char_image = resized_image[y_min:y_max, x_min:x_max]
 
             result_dict = {
                 "box": box,
@@ -293,13 +319,14 @@ class OCRService:
 
             character_results.append(result_dict)
 
-        return character_results
+        return character_results, resized_image, scale
 
     def process_image(
         self,
         image_path: str | Path,
         output_dir: Optional[str | Path] = None,
         save_character_images: bool = True,
+        max_side: int = 2000,
     ) -> Dict[str, Any]:
         """
         完整的OCR处理流程：检测字符 -> 识别 -> 提取字符图像
@@ -308,11 +335,14 @@ class OCRService:
             image_path: 输入图像路径
             output_dir: 输出目录，用于保存字符图像
             save_character_images: 是否保存字符图像，默认True
+            max_side: 最长边的最大像素值，默认2000
 
         Returns:
             处理结果字典，包含:
             {
                 'image_path': 输入图像路径,
+                'resized_image': 缩放后的图像numpy数组,
+                'scale': 缩放比例,
                 'characters': [
                     {
                         'box': [[x1,y1], [x2,y2], [x3,y3], [x4,y4]],
@@ -327,13 +357,15 @@ class OCRService:
         """
         image_path = Path(image_path)
 
-        # 提取所有字符图像
-        character_results = self.extract_character_images(
-            image_path, output_dir, save_character_images
+        # 提取所有字符图像（会自动缩放图像）
+        character_results, resized_image, scale = self.extract_character_images(
+            image_path, output_dir, save_character_images, max_side
         )
 
         return {
             "image_path": str(image_path),
+            "resized_image": resized_image,
+            "scale": scale,
             "characters": character_results,
             "total_characters": len(character_results),
         }
@@ -376,7 +408,8 @@ def extract_character_images(
     image_path: str | Path,
     output_dir: Optional[str | Path] = None,
     save_images: bool = True,
-) -> List[Dict[str, Any]]:
+    max_side: int = 2000,
+) -> tuple[List[Dict[str, Any]], np.ndarray, float]:
     """
     便捷函数：提取字符图像
 
@@ -384,12 +417,13 @@ def extract_character_images(
         image_path: 输入图像路径
         output_dir: 输出目录
         save_images: 是否保存图像
+        max_side: 最长边的最大像素值，默认2000
 
     Returns:
-        字符信息列表
+        (字符信息列表, 缩放后的图像, 缩放比例)
     """
     return get_ocr_service().extract_character_images(
-        image_path, output_dir, save_images
+        image_path, output_dir, save_images, max_side
     )
 
 
@@ -397,6 +431,7 @@ def process_image(
     image_path: str | Path,
     output_dir: Optional[str | Path] = None,
     save_character_images: bool = True,
+    max_side: int = 2000,
 ) -> Dict[str, Any]:
     """
     便捷函数：完整的OCR处理流程
@@ -405,10 +440,11 @@ def process_image(
         image_path: 输入图像路径
         output_dir: 输出目录
         save_character_images: 是否保存字符图像
+        max_side: 最长边的最大像素值，默认2000
 
     Returns:
         处理结果字典
     """
     return get_ocr_service().process_image(
-        image_path, output_dir, save_character_images
+        image_path, output_dir, save_character_images, max_side
     )

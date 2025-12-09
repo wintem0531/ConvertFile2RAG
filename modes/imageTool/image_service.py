@@ -92,6 +92,61 @@ def grayscale_to_binary(
     return binary
 
 
+def resize_image_by_max_side(
+    image_path: str | Path,
+    max_side: int = 2000,
+    output_path: Optional[str | Path] = None,
+) -> tuple[np.ndarray, float]:
+    """
+    按最长边等比例缩放图像
+
+    Args:
+        image_path: 输入图像路径
+        max_side: 最长边的最大像素值，默认2000
+        output_path: 输出图像路径，如果为None则只返回变量，不保存
+
+    Returns:
+        (缩放后的图像numpy数组, 缩放比例)
+
+    Raises:
+        FileNotFoundError: 图像文件不存在
+    """
+    image_path = Path(image_path)
+    if not image_path.exists():
+        raise FileNotFoundError(f"图像文件不存在: {image_path}")
+
+    # 读取图像
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise ValueError(f"无法读取图像文件: {image_path}")
+
+    h, w = image.shape[:2]
+    max_dimension = max(h, w)
+
+    # 如果最长边已经小于等于max_side，不需要缩放
+    if max_dimension <= max_side:
+        scale = 1.0
+        resized = image
+    else:
+        # 计算缩放比例
+        scale = max_side / max_dimension
+        new_width = int(w * scale)
+        new_height = int(h * scale)
+
+        # 缩放图像
+        resized = cv2.resize(
+            image, (new_width, new_height), interpolation=cv2.INTER_AREA
+        )
+
+    # 如果指定了输出路径，保存图像
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), resized)
+
+    return resized, scale
+
+
 def resize_images(
     image_paths: List[str | Path],
     target_size: int,
@@ -295,6 +350,175 @@ def crop_image(
         cv2.imwrite(str(output_path), cropped)
 
     return cropped
+
+
+def draw_boxes(
+    image_path: str | Path,
+    boxes: Optional[List[Tuple[int, int, int, int]]] = None,
+    box: Optional[Tuple[int, int, int, int]] = None,
+    corners: Optional[
+        Union[
+            Tuple[int, int, int, int],
+            List[Tuple[int, int]],
+            List[Union[Tuple[int, int, int, int], List[Tuple[int, int]]]],
+        ]
+    ] = None,
+    output_path: Optional[str | Path] = None,
+    color: Tuple[int, int, int] = (0, 255, 0),
+    thickness: int = 2,
+    label: Optional[str] = None,
+    labels: Optional[List[str]] = None,
+) -> np.ndarray:
+    """
+    根据box或者对角角点，在图中绘制出对应的框线
+
+    Args:
+        image_path: 输入图像路径
+        boxes: box列表，每个box格式为 (x1, y1, x2, y2)，用于绘制多个框
+        box: 单个box，格式为 (x1, y1, x2, y2)，用于绘制单个框
+        corners: 对角角点，可以是：
+            - (x1, y1, x2, y2) 元组 - 单个框
+            - [(x1, y1), (x2, y2)] 列表 - 单个框
+            - 包含多个框的列表 - 多个框
+        output_path: 输出图像路径，如果为None则只返回变量，不保存
+        color: 框线颜色 (B, G, R)，默认绿色 (0, 255, 0)
+        thickness: 框线粗细，默认2
+        label: 单个框的标签文本（显示在框上方）
+        labels: 多个框的标签文本列表（与boxes对应）
+
+    Returns:
+        绘制了框线的图像numpy数组
+
+    Raises:
+        FileNotFoundError: 图像文件不存在
+        ValueError: 参数无效
+    """
+    image_path = Path(image_path)
+    if not image_path.exists():
+        raise FileNotFoundError(f"图像文件不存在: {image_path}")
+
+    # 读取图像
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise ValueError(f"无法读取图像文件: {image_path}")
+
+    h, w = image.shape[:2]
+
+    # 收集所有要绘制的框
+    boxes_to_draw = []
+
+    # 处理boxes参数（多个框）
+    if boxes is not None:
+        if not isinstance(boxes, list):
+            raise ValueError("boxes必须是列表")
+        boxes_to_draw.extend(boxes)
+        if labels is not None and len(labels) != len(boxes):
+            raise ValueError("labels长度必须与boxes相同")
+
+    # 处理box参数（单个框）
+    if box is not None:
+        boxes_to_draw.append(box)
+        if label is not None:
+            labels = [label] if labels is None else labels + [label]
+
+    # 处理corners参数
+    if corners is not None:
+        if isinstance(corners, tuple) and len(corners) == 4:
+            # 格式: (x1, y1, x2, y2) - 单个框
+            x1, y1, x2, y2 = corners
+            boxes_to_draw.append((x1, y1, x2, y2))
+            if label is not None:
+                labels = [label] if labels is None else labels + [label]
+        elif isinstance(corners, list):
+            if len(corners) == 2 and all(
+                isinstance(c, (tuple, list)) and len(c) == 2 for c in corners
+            ):
+                # 格式: [(x1, y1), (x2, y2)] - 单个框
+                (x1, y1), (x2, y2) = corners
+                boxes_to_draw.append((x1, y1, x2, y2))
+                if label is not None:
+                    labels = [label] if labels is None else labels + [label]
+            else:
+                # 多个框的列表
+                for corner_item in corners:
+                    if isinstance(corner_item, tuple) and len(corner_item) == 4:
+                        # 格式: (x1, y1, x2, y2)
+                        boxes_to_draw.append(corner_item)
+                    elif isinstance(corner_item, list) and len(corner_item) == 2:
+                        # 格式: [(x1, y1), (x2, y2)]
+                        (x1, y1), (x2, y2) = corner_item
+                        boxes_to_draw.append((x1, y1, x2, y2))
+                    else:
+                        raise ValueError(
+                            f"corners格式无效: {corner_item}，应为(x1, y1, x2, y2)或[(x1, y1), (x2, y2)]"
+                        )
+
+    if not boxes_to_draw:
+        raise ValueError("必须提供boxes、box或corners参数之一")
+
+    # 绘制所有框
+    for idx, box_coords in enumerate(boxes_to_draw):
+        if not isinstance(box_coords, tuple) or len(box_coords) != 4:
+            raise ValueError(f"box格式无效: {box_coords}，应为(x1, y1, x2, y2)")
+
+        x1, y1, x2, y2 = box_coords
+
+        # 确保坐标在图像范围内
+        x1 = max(0, min(int(x1), w - 1))
+        y1 = max(0, min(int(y1), h - 1))
+        x2 = max(0, min(int(x2), w - 1))
+        y2 = max(0, min(int(y2), h - 1))
+
+        # 确保 x1 < x2, y1 < y2
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if y1 > y2:
+            y1, y2 = y2, y1
+
+        # 绘制矩形框
+        cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
+
+        # 如果有标签，在框上方绘制文本
+        if labels is not None and idx < len(labels) and labels[idx]:
+            label_text = str(labels[idx])
+            # 计算文本大小
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            text_thickness = 1
+            (text_width, text_height), baseline = cv2.getTextSize(
+                label_text, font, font_scale, text_thickness
+            )
+
+            # 在框上方绘制文本背景
+            text_x = x1
+            text_y = max(y1 - 5, text_height + 5)
+            cv2.rectangle(
+                image,
+                (text_x, text_y - text_height - 5),
+                (text_x + text_width, text_y + baseline),
+                color,
+                -1,
+            )
+
+            # 绘制文本
+            cv2.putText(
+                image,
+                label_text,
+                (text_x, text_y),
+                font,
+                font_scale,
+                (255, 255, 255),  # 白色文本
+                text_thickness,
+                cv2.LINE_AA,
+            )
+
+    # 如果指定了输出路径，保存图像
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_path), image)
+
+    return image
 
 
 def merge_overlapping_boxes(
