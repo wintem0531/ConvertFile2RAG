@@ -1,4 +1,4 @@
-import modules.pdfConverter.pdf_service as pdf_service
+import modes.pdfConverter.pdf_service as pdf_service
 
 
 def main():
