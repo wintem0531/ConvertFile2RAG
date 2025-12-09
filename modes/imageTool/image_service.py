@@ -1,7 +1,6 @@
 """图像处理服务模块"""
 
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -9,7 +8,7 @@ import numpy as np
 
 def color_to_grayscale(
     image_path: str | Path,
-    output_path: Optional[str | Path] = None,
+    output_path: str | Path | None = None,
 ) -> np.ndarray:
     """
     将彩色图像转换为灰度图
@@ -48,7 +47,7 @@ def color_to_grayscale(
 def grayscale_to_binary(
     image_path: str | Path,
     threshold: int = 128,
-    output_path: Optional[str | Path] = None,
+    output_path: str | Path | None = None,
     use_otsu: bool = False,
 ) -> np.ndarray:
     """
@@ -77,9 +76,7 @@ def grayscale_to_binary(
 
     # 二值化
     if use_otsu:
-        _, binary = cv2.threshold(
-            grayscale, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )
+        _, binary = cv2.threshold(grayscale, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     else:
         _, binary = cv2.threshold(grayscale, threshold, 255, cv2.THRESH_BINARY)
 
@@ -95,7 +92,7 @@ def grayscale_to_binary(
 def resize_image_by_max_side(
     image_path: str | Path,
     max_side: int = 2000,
-    output_path: Optional[str | Path] = None,
+    output_path: str | Path | None = None,
 ) -> tuple[np.ndarray, float]:
     """
     按最长边等比例缩放图像
@@ -134,9 +131,7 @@ def resize_image_by_max_side(
         new_height = int(h * scale)
 
         # 缩放图像
-        resized = cv2.resize(
-            image, (new_width, new_height), interpolation=cv2.INTER_AREA
-        )
+        resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
     # 如果指定了输出路径，保存图像
     if output_path is not None:
@@ -148,11 +143,11 @@ def resize_image_by_max_side(
 
 
 def resize_images(
-    image_paths: List[str | Path],
+    image_paths: list[str | Path],
     target_size: int,
     dimension: str = "width",
-    output_dir: Optional[str | Path] = None,
-) -> List[np.ndarray]:
+    output_dir: str | Path | None = None,
+) -> list[np.ndarray]:
     """
     按长或宽的长度，按比例缩放一批图像
 
@@ -202,16 +197,12 @@ def resize_images(
             new_width = int(w * scale)
 
         # 缩放图像
-        resized = cv2.resize(
-            image, (new_width, new_height), interpolation=cv2.INTER_AREA
-        )
+        resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
         resized_images.append(resized)
 
         # 如果指定了输出目录，保存图像
         if output_dir:
-            output_filename = (
-                f"{image_path.stem}_resized_{dimension}{target_size}{image_path.suffix}"
-            )
+            output_filename = f"{image_path.stem}_resized_{dimension}{target_size}{image_path.suffix}"
             output_path = output_dir / output_filename
             cv2.imwrite(str(output_path), resized)
 
@@ -223,7 +214,7 @@ def morphology_operation(
     operation: str = "dilate",
     kernel_size: int = 3,
     iterations: int = 1,
-    output_path: Optional[str | Path] = None,
+    output_path: str | Path | None = None,
 ) -> np.ndarray:
     """
     形态学操作（膨胀和腐蚀）
@@ -277,9 +268,9 @@ def morphology_operation(
 
 def crop_image(
     image_path: str | Path,
-    box: Optional[Tuple[int, int, int, int]] = None,
-    corners: Optional[Union[Tuple[int, int, int, int], List[Tuple[int, int]]]] = None,
-    output_path: Optional[str | Path] = None,
+    box: tuple[int, int, int, int] | None = None,
+    corners: tuple[int, int, int, int] | list[tuple[int, int]] | None = None,
+    output_path: str | Path | None = None,
 ) -> np.ndarray:
     """
     按照box或者对角角点裁切图像
@@ -324,9 +315,7 @@ def crop_image(
             # 格式: [(x1, y1), (x2, y2)]
             (x1, y1), (x2, y2) = corners
         else:
-            raise ValueError(
-                "corners格式无效，应为(x1, y1, x2, y2)或[(x1, y1), (x2, y2)]"
-            )
+            raise ValueError("corners格式无效，应为(x1, y1, x2, y2)或[(x1, y1), (x2, y2)]")
 
     # 确保坐标在图像范围内
     x1 = max(0, min(x1, w))
@@ -354,20 +343,19 @@ def crop_image(
 
 def draw_boxes(
     image_path: str | Path,
-    boxes: Optional[List[Tuple[int, int, int, int]]] = None,
-    box: Optional[Tuple[int, int, int, int]] = None,
-    corners: Optional[
-        Union[
-            Tuple[int, int, int, int],
-            List[Tuple[int, int]],
-            List[Union[Tuple[int, int, int, int], List[Tuple[int, int]]]],
-        ]
-    ] = None,
-    output_path: Optional[str | Path] = None,
-    color: Tuple[int, int, int] = (0, 255, 0),
+    boxes: list[tuple[int, int, int, int]] | None = None,
+    box: tuple[int, int, int, int] | None = None,
+    corners: (
+        tuple[int, int, int, int]
+        | list[tuple[int, int]]
+        | list[tuple[int, int, int, int] | list[tuple[int, int]]]
+        | None
+    ) = None,
+    output_path: str | Path | None = None,
+    color: tuple[int, int, int] = (0, 255, 0),
     thickness: int = 2,
-    label: Optional[str] = None,
-    labels: Optional[List[str]] = None,
+    label: str | None = None,
+    labels: list[str] | None = None,
 ) -> np.ndarray:
     """
     根据box或者对角角点，在图中绘制出对应的框线
@@ -430,9 +418,7 @@ def draw_boxes(
             if label is not None:
                 labels = [label] if labels is None else labels + [label]
         elif isinstance(corners, list):
-            if len(corners) == 2 and all(
-                isinstance(c, (tuple, list)) and len(c) == 2 for c in corners
-            ):
+            if len(corners) == 2 and all(isinstance(c, (tuple, list)) and len(c) == 2 for c in corners):
                 # 格式: [(x1, y1), (x2, y2)] - 单个框
                 (x1, y1), (x2, y2) = corners
                 boxes_to_draw.append((x1, y1, x2, y2))
@@ -449,9 +435,7 @@ def draw_boxes(
                         (x1, y1), (x2, y2) = corner_item
                         boxes_to_draw.append((x1, y1, x2, y2))
                     else:
-                        raise ValueError(
-                            f"corners格式无效: {corner_item}，应为(x1, y1, x2, y2)或[(x1, y1), (x2, y2)]"
-                        )
+                        raise ValueError(f"corners格式无效: {corner_item}，应为(x1, y1, x2, y2)或[(x1, y1), (x2, y2)]")
 
     if not boxes_to_draw:
         raise ValueError("必须提供boxes、box或corners参数之一")
@@ -485,9 +469,7 @@ def draw_boxes(
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.6
             text_thickness = 1
-            (text_width, text_height), baseline = cv2.getTextSize(
-                label_text, font, font_scale, text_thickness
-            )
+            (text_width, text_height), baseline = cv2.getTextSize(label_text, font, font_scale, text_thickness)
 
             # 在框上方绘制文本背景
             text_x = x1
@@ -522,9 +504,9 @@ def draw_boxes(
 
 
 def merge_overlapping_boxes(
-    boxes: List[Tuple[int, int, int, int]],
+    boxes: list[tuple[int, int, int, int]],
     overlap_threshold: float = 0.5,
-) -> List[Tuple[int, int, int, int]]:
+) -> list[tuple[int, int, int, int]]:
     """
     按照box是否重合，合并同一张图像上的box列表
 
@@ -546,9 +528,7 @@ def merge_overlapping_boxes(
         if not isinstance(box, tuple) or len(box) != 4:
             raise ValueError(f"box格式无效: {box}，应为(x1, y1, x2, y2)")
 
-    def calculate_iou(
-        box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int]
-    ) -> float:
+    def calculate_iou(box1: tuple[int, int, int, int], box2: tuple[int, int, int, int]) -> float:
         """计算两个box的IoU（交并比）"""
         x1_1, y1_1, x2_1, y2_1 = box1
         x1_2, y1_2, x2_2, y2_2 = box2
@@ -574,9 +554,7 @@ def merge_overlapping_boxes(
 
         return intersection / union
 
-    def merge_two_boxes(
-        box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int]
-    ) -> Tuple[int, int, int, int]:
+    def merge_two_boxes(box1: tuple[int, int, int, int], box2: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
         """合并两个box"""
         x1_1, y1_1, x2_1, y2_1 = box1
         x1_2, y1_2, x2_2, y2_2 = box2

@@ -4,7 +4,6 @@ import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Optional
 
 import fitz  # PyMuPDF
 
@@ -65,9 +64,9 @@ def pdf_to_images(
     output_dir: str | Path,
     dpi: int = 200,
     image_format: str = "png",
-    max_workers: Optional[int] = None,
+    max_workers: int | None = None,
     use_async: bool = True,
-) -> List[str]:
+) -> list[str]:
     """
     将PDF的所有页面转换为图像（支持异步并行处理）
 
@@ -109,11 +108,7 @@ def pdf_to_images(
 
     # 使用异步并行处理
     workers = max_workers if max_workers is not None else get_optimal_workers()
-    return asyncio.run(
-        _pdf_to_images_async(
-            pdf_path, output_dir, dpi, image_format, pdf_name, total_pages, workers
-        )
-    )
+    return asyncio.run(_pdf_to_images_async(pdf_path, output_dir, dpi, image_format, pdf_name, total_pages, workers))
 
 
 def _pdf_to_images_sync(
@@ -122,7 +117,7 @@ def _pdf_to_images_sync(
     dpi: int,
     image_format: str,
     pdf_name: str,
-) -> List[str]:
+) -> list[str]:
     """同步版本：顺序处理所有页面"""
     pdf_document = fitz.open(pdf_path)
     image_paths = []
@@ -150,7 +145,7 @@ async def _pdf_to_images_async(
     pdf_name: str,
     total_pages: int,
     max_workers: int,
-) -> List[str]:
+) -> list[str]:
     """异步版本：并行处理所有页面"""
     loop = asyncio.get_event_loop()
 
@@ -234,9 +229,9 @@ def pdf_pages_range_to_images(
     output_dir: str | Path,
     dpi: int = 200,
     image_format: str = "png",
-    max_workers: Optional[int] = None,
+    max_workers: int | None = None,
     use_async: bool = True,
-) -> List[str]:
+) -> list[str]:
     """
     将PDF的指定页数范围转换为图像（支持异步并行处理）
 
@@ -286,9 +281,7 @@ def pdf_pages_range_to_images(
 
     # 如果只有1页或禁用异步，使用同步处理
     if page_count == 1 or not use_async:
-        return _pdf_pages_range_to_images_sync(
-            pdf_path, output_dir, dpi, image_format, pdf_name, start_page, end_page
-        )
+        return _pdf_pages_range_to_images_sync(pdf_path, output_dir, dpi, image_format, pdf_name, start_page, end_page)
 
     # 使用异步并行处理
     workers = max_workers if max_workers is not None else get_optimal_workers()
@@ -314,7 +307,7 @@ def _pdf_pages_range_to_images_sync(
     pdf_name: str,
     start_page: int,
     end_page: int,
-) -> List[str]:
+) -> list[str]:
     """同步版本：顺序处理指定范围的页面"""
     pdf_document = fitz.open(pdf_path)
     image_paths = []
@@ -343,7 +336,7 @@ async def _pdf_pages_range_to_images_async(
     start_page: int,
     end_page: int,
     max_workers: int,
-) -> List[str]:
+) -> list[str]:
     """异步版本：并行处理指定范围的页面"""
     loop = asyncio.get_event_loop()
 

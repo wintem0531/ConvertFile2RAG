@@ -71,10 +71,8 @@ def test_ocr_detection_and_drawing():
 
         # 2. 提取字符图像（使用缩放后的图像）
         print("\n📸 步骤2: 提取字符图像...")
-        character_results, resized_image_extract, scale_extract = (
-            ocr_service.extract_character_images(
-                image_path, char_images_dir, save_images=True
-            )
+        character_results, resized_image_extract, scale_extract = ocr_service.extract_character_images(
+            image_path, char_images_dir, save_images=True
         )
         print(f"✅ 提取完成，共提取 {len(character_results)} 个字符图像")
 
@@ -119,9 +117,7 @@ def test_ocr_detection_and_drawing():
 
         # 6. 统计信息
         elapsed_time = time.time() - start_time
-        avg_confidence = sum(char["confidence"] for char in character_results) / len(
-            character_results
-        )
+        avg_confidence = sum(char["confidence"] for char in character_results) / len(character_results)
 
         print("\n" + "=" * 60)
         print("📊 测试结果统计")
@@ -143,10 +139,7 @@ def test_ocr_detection_and_drawing():
             confidence = char_info["confidence"]
             box = char_info["box"]
             rect_box = convert_box_to_rect(box)
-            print(
-                f"{idx:2d}. 文本: '{text}' | 置信度: {confidence:.4f} | "
-                f"位置: {rect_box}"
-            )
+            print(f"{idx:2d}. 文本: '{text}' | 置信度: {confidence:.4f} | 位置: {rect_box}")
 
         print("\n✅ 所有测试完成！")
 
@@ -177,9 +170,7 @@ def test_ocr_process_image():
 
     try:
         # 使用完整处理流程
-        result = ocr_service.process_image(
-            image_path, output_dir, save_character_images=True
-        )
+        result = ocr_service.process_image(image_path, output_dir, save_character_images=True)
 
         elapsed_time = time.time() - start_time
 

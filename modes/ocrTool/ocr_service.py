@@ -2,7 +2,7 @@
 
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import cv2
 import numpy as np
@@ -33,12 +33,13 @@ class OCRService:
                 "Rec.model_type": ModelType.MOBILE,
                 "Rec.ocr_version": OCRVersion.PPOCRV5,
                 "Global.max_side_len": 2000,
+                "Global.log_level": "critical",
             },
         )
 
     def detect_characters(
         self, image_path: str | Path, max_side: int = 2000
-    ) -> tuple[List[Tuple[List[List[float]], str, float]], np.ndarray, float]:
+    ) -> tuple[list[tuple[list[list[float]], str, float]], np.ndarray, float]:
         """
         使用OCR的det步骤，获取图像中所有"单个字"的定位框
 
@@ -56,9 +57,7 @@ class OCRService:
             raise FileNotFoundError(f"图像文件不存在: {image_path}")
 
         # 先缩放图像至最长边不超过max_side
-        resized_image, scale = image_service.resize_image_by_max_side(
-            image_path, max_side=max_side
-        )
+        resized_image, scale = image_service.resize_image_by_max_side(image_path, max_side=max_side)
 
         # 保存缩放后的图像到临时文件
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
@@ -81,10 +80,7 @@ class OCRService:
                 if not line_results:
                     continue
                 for word_result in line_results:
-                    if (
-                        not isinstance(word_result, (list, tuple))
-                        or len(word_result) < 3
-                    ):
+                    if not isinstance(word_result, (list, tuple)) or len(word_result) < 3:
                         continue
 
                     # 识别box、text和confidence
@@ -96,10 +92,7 @@ class OCRService:
                     for item in word_result:
                         if isinstance(item, (list, tuple)) and len(item) >= 4:
                             # 检查是否是box（坐标点列表）
-                            if all(
-                                isinstance(p, (list, tuple)) and len(p) >= 2
-                                for p in item
-                            ):
+                            if all(isinstance(p, (list, tuple)) and len(p) >= 2 for p in item):
                                 try:
                                     _ = [float(p[0]) for p in item]
                                     _ = [float(p[1]) for p in item]
@@ -108,27 +101,16 @@ class OCRService:
                                     pass
                         elif isinstance(item, str):
                             text = item
-                        elif isinstance(item, (int, float)) or (
-                            hasattr(np, "number") and isinstance(item, np.number)
-                        ):
+                        elif isinstance(item, (int, float)) or (hasattr(np, "number") and isinstance(item, np.number)):
                             confidence = item
 
                     # 如果还没找到，尝试默认顺序
                     if dt_box is None or text is None or confidence is None:
-                        if (
-                            isinstance(word_result[0], (list, tuple))
-                            and len(word_result[0]) >= 4
-                        ):
+                        if isinstance(word_result[0], (list, tuple)) and len(word_result[0]) >= 4:
                             dt_box = word_result[0]
-                        elif (
-                            isinstance(word_result[1], (list, tuple))
-                            and len(word_result[1]) >= 4
-                        ):
+                        elif isinstance(word_result[1], (list, tuple)) and len(word_result[1]) >= 4:
                             dt_box = word_result[1]
-                        elif (
-                            isinstance(word_result[2], (list, tuple))
-                            and len(word_result[2]) >= 4
-                        ):
+                        elif isinstance(word_result[2], (list, tuple)) and len(word_result[2]) >= 4:
                             dt_box = word_result[2]
 
                         if isinstance(word_result[0], str):
@@ -139,18 +121,15 @@ class OCRService:
                             text = word_result[2]
 
                         if isinstance(word_result[0], (int, float)) or (
-                            hasattr(np, "number")
-                            and isinstance(word_result[0], np.number)
+                            hasattr(np, "number") and isinstance(word_result[0], np.number)
                         ):
                             confidence = word_result[0]
                         elif isinstance(word_result[1], (int, float)) or (
-                            hasattr(np, "number")
-                            and isinstance(word_result[1], np.number)
+                            hasattr(np, "number") and isinstance(word_result[1], np.number)
                         ):
                             confidence = word_result[1]
                         elif isinstance(word_result[2], (int, float)) or (
-                            hasattr(np, "number")
-                            and isinstance(word_result[2], np.number)
+                            hasattr(np, "number") and isinstance(word_result[2], np.number)
                         ):
                             confidence = word_result[2]
 
@@ -173,9 +152,7 @@ class OCRService:
                 # 处理不同的返回格式
                 if hasattr(ocr_result, "boxes"):
                     # 新格式: RapidOCROutput对象
-                    result = list(
-                        zip(ocr_result.boxes, ocr_result.txts, ocr_result.scores)
-                    )
+                    result = list(zip(ocr_result.boxes, ocr_result.txts, ocr_result.scores))
                 else:
                     # 旧格式: tuple (result, _)
                     result, _ = ocr_result
@@ -191,9 +168,7 @@ class OCRService:
 
         return word_results, resized_image, scale
 
-    def recognize_character(
-        self, image: np.ndarray, box: List[List[float]]
-    ) -> Tuple[str, float]:
+    def recognize_character(self, image: np.ndarray, box: list[list[float]]) -> tuple[str, float]:
         """
         对单个字符进行OCR识别
 
@@ -245,10 +220,10 @@ class OCRService:
     def extract_character_images(
         self,
         image_path: str | Path,
-        output_dir: Optional[str | Path] = None,
+        output_dir: str | Path | None = None,
         save_images: bool = True,
         max_side: int = 2000,
-    ) -> tuple[List[Dict[str, Any]], np.ndarray, float]:
+    ) -> tuple[list[dict[str, Any]], np.ndarray, float]:
         """
         提取图像中所有单个字符的图像
 
@@ -308,9 +283,7 @@ class OCRService:
                 # 保存字符图像
                 image_filename = f"char_{idx:04d}_{text}_{confidence:.2f}.png"
                 # 清理文件名中的非法字符
-                image_filename = "".join(
-                    c if c.isalnum() or c in "._-" else "_" for c in image_filename
-                )
+                image_filename = "".join(c if c.isalnum() or c in "._-" else "_" for c in image_filename)
                 image_path_save = output_dir / image_filename
                 cv2.imwrite(str(image_path_save), char_image)
                 result_dict["image_path"] = str(image_path_save)
@@ -324,10 +297,10 @@ class OCRService:
     def process_image(
         self,
         image_path: str | Path,
-        output_dir: Optional[str | Path] = None,
+        output_dir: str | Path | None = None,
         save_character_images: bool = True,
         max_side: int = 2000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         完整的OCR处理流程：检测字符 -> 识别 -> 提取字符图像
 
@@ -372,7 +345,7 @@ class OCRService:
 
 
 # 创建全局OCR服务实例
-_ocr_service_instance: Optional[OCRService] = None
+_ocr_service_instance: OCRService | None = None
 
 
 def get_ocr_service() -> OCRService:
@@ -391,7 +364,7 @@ def get_ocr_service() -> OCRService:
 # 便捷函数
 def detect_characters(
     image_path: str | Path,
-) -> List[Tuple[List[List[float]], str, float]]:
+) -> list[tuple[list[list[float]], str, float]]:
     """
     便捷函数：检测图像中的字符
 
@@ -406,10 +379,10 @@ def detect_characters(
 
 def extract_character_images(
     image_path: str | Path,
-    output_dir: Optional[str | Path] = None,
+    output_dir: str | Path | None = None,
     save_images: bool = True,
     max_side: int = 2000,
-) -> tuple[List[Dict[str, Any]], np.ndarray, float]:
+) -> tuple[list[dict[str, Any]], np.ndarray, float]:
     """
     便捷函数：提取字符图像
 
@@ -422,17 +395,15 @@ def extract_character_images(
     Returns:
         (字符信息列表, 缩放后的图像, 缩放比例)
     """
-    return get_ocr_service().extract_character_images(
-        image_path, output_dir, save_images, max_side
-    )
+    return get_ocr_service().extract_character_images(image_path, output_dir, save_images, max_side)
 
 
 def process_image(
     image_path: str | Path,
-    output_dir: Optional[str | Path] = None,
+    output_dir: str | Path | None = None,
     save_character_images: bool = True,
     max_side: int = 2000,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     便捷函数：完整的OCR处理流程
 
@@ -445,6 +416,4 @@ def process_image(
     Returns:
         处理结果字典
     """
-    return get_ocr_service().process_image(
-        image_path, output_dir, save_character_images, max_side
-    )
+    return get_ocr_service().process_image(image_path, output_dir, save_character_images, max_side)
