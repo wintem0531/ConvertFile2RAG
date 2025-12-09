@@ -8,7 +8,7 @@ dependencies = [
     "opencv-python>=4.12.0.88",
     "pillow>=12.0.0",
     "pymupdf>=1.26.6",
-    "rapidocr-onnxruntime>=1.4.4",
+    "rapidocr>=3.4.2",
     "typer>=0.20.0",
 ]
 
