@@ -96,6 +96,9 @@ test_file/*/result/
 # 测试输出（保留输入文件，忽略输出）
 test_file/**/output/
 test_file/**/result/
+test_file/**
+!test_file/input
+!test_file/input/**
 
 # 大型文件（可选，根据需要取消注释）
 *.pdf
