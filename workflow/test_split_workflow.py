@@ -1,5 +1,6 @@
 """文字区域检测和分类工作流测试模块"""
 
+import hashlib
 import sys
 import time
 from pathlib import Path
@@ -109,7 +110,7 @@ def test_split_workflow():
     print("=" * 60)
 
     # 测试图像路径
-    image_path = PROJECT_ROOT / "test_file/1.pdf2png/all_pages/齊系文字編_page_24.png"
+    image_path = PROJECT_ROOT / "test_file/1.pdf2png/all_pages/齊系文字編_page_25.png"
     output_dir = PROJECT_ROOT / "test_file/4.split_workflow"
 
     if not image_path.exists():
@@ -171,6 +172,9 @@ def test_split_workflow():
 
         # 用于记录异常框的映射
         box_to_tag_map: dict[int, str] = {}
+
+        # 用于收集所有框的信息（用于后续组装文本）
+        box_info_list: list[dict] = []
 
         # 步骤3: 裁切每个检测框并进行识别
         print("\n✂️  步骤3: 裁切检测框并进行识别...")
@@ -302,6 +306,18 @@ def test_split_workflow():
                 abnormal_path_save = non_text_images_dir / abnormal_filename
                 cv2.imwrite(str(abnormal_path_save), cropped_image)
 
+            # 收集框信息（用于后续组装文本）
+            box_info_list.append(
+                {
+                    "idx": idx,
+                    "row_index": row_idx,
+                    "col_index": col_idx,
+                    "tag": box_to_tag_map.get(idx, "normal"),
+                    "text": text.strip() if text else "",
+                    "image": cropped_image.copy(),
+                }
+            )
+
             # 每处理10个框显示一次进度
             if (idx + 1) % 10 == 0:
                 print(f"  已处理 {idx + 1}/{len(sorted_boxes)} 个检测框...")
@@ -392,6 +408,75 @@ def test_split_workflow():
 
             cv2.imwrite(str(output_image_path), draw_image)
             print(f"✅ 检测结果图像已保存至: {output_image_path}")
+
+        # 步骤5: 处理异常框和组装OCR结果文本
+        print("\n📝 步骤5: 处理异常框并组装OCR结果文本...")
+
+        # 创建abnormal_pic目录
+        abnormal_pic_dir = output_dir / "abnormal_pic"
+        abnormal_pic_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. 将所有abnormal框以{hash.png}格式存储
+        box_hash_map: dict[int, str] = {}  # idx -> hash
+        for box_info in box_info_list:
+            if box_info["tag"] == "abnormal":
+                # 计算图像的hash值
+                image_bytes = cv2.imencode(".png", box_info["image"])[1].tobytes()
+                image_hash = hashlib.md5(image_bytes).hexdigest()
+                hash_filename = f"{image_hash}.png"
+                hash_path = abnormal_pic_dir / hash_filename
+                cv2.imwrite(str(hash_path), box_info["image"])
+                box_hash_map[box_info["idx"]] = image_hash
+
+        print(f"✅ 已保存 {len(box_hash_map)} 个异常框到 {abnormal_pic_dir}")
+
+        # 2. 按行号-列号排序，组装OCR结果文本
+        # 先按行号分组，再按列号排序
+        rows_dict: dict[int, list[dict]] = {}
+        for box_info in box_info_list:
+            row_idx = box_info["row_index"]
+            if row_idx not in rows_dict:
+                rows_dict[row_idx] = []
+            rows_dict[row_idx].append(box_info)
+
+        # 对每行内的框按列号排序
+        for row_idx in rows_dict:
+            rows_dict[row_idx].sort(key=lambda x: x["col_index"])
+
+        # 按行号排序组装文本
+        text_lines = []
+        sorted_row_indices = sorted(rows_dict.keys())
+
+        for row_idx in sorted_row_indices:
+            row_boxes = rows_dict[row_idx]
+            row_text_parts = []
+
+            for box_info in row_boxes:
+                tag = box_info["tag"]
+                text = box_info["text"]
+
+                # 根据标签和OCR结果组装文本
+                if tag == "abnormal":
+                    # abnormal标签，写入{hash.png}
+                    image_hash = box_hash_map.get(box_info["idx"], "")
+                    row_text_parts.append(f"{{{image_hash}.png}}")
+                elif tag == "normal":
+                    if text:
+                        # normal标签且有OCR结果，直接写入
+                        row_text_parts.append(text)
+                    else:
+                        # normal标签但没有OCR结果，写入"$$OCR无结果$$"
+                        row_text_parts.append("$$OCR无结果$$")
+
+            # 同一行的框连接在一起（不换行）
+            row_text = "".join(row_text_parts)
+            text_lines.append(row_text)
+
+        # 3. 将组装好的文字保存为txt文件（行与行之间换行）
+        output_text = "\n".join(text_lines)
+        txt_output_path = output_dir / "ocr_result.txt"
+        txt_output_path.write_text(output_text, encoding="utf-8")
+        print(f"✅ OCR结果文本已保存至: {txt_output_path}")
 
         print("\n✅ 工作流测试完成！")
 
