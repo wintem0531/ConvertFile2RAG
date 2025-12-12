@@ -73,3 +73,85 @@ refactor(frontend): 重构节点组件为 ComfyUI 风格
 4. 多个改动点使用列表形式
 5. 全程使用中文（技术术语除外）
 
+## 开发环境规范
+
+### UV 虚拟环境管理
+
+所有项目使用 `uv` 创建的虚拟环境，执行命令时必须遵循以下规则：
+
+```bash
+# 运行 Python 脚本
+uv run script.py
+
+# 安装/更新依赖
+uv add package-name
+
+# 移除依赖
+uv remove package-name
+
+# 同步依赖
+uv sync
+
+# 运行测试
+uv run pytest
+
+# 检查代码格式
+uv run ruff check
+uv run ruff format
+```
+
+### Ruff 代码格式化
+
+所有代码提交前必须通过 Ruff 检查：
+
+```bash
+# 检查代码问题
+uv run ruff check
+
+# 自动修复可修复的问题
+uv run ruff check --fix
+
+# 格式化代码
+uv run ruff format
+```
+
+### 测试脚本管理
+
+- 所有非指定创建的测试脚本必须放入项目根目录的 `script` 文件夹
+- 测试脚本命名应使用 `test_` 前缀或描述性名称
+- 创建测试脚本时自动生成执行指令
+
+### MCP 工具使用原则
+
+在可用时优先使用 MCP 工具提升效率：
+
+1. 优先使用已安装的 MCP 工具
+2. 根据任务需求自动选择合适的工具
+3. 如需额外的 MCP 工具，将列出建议安装的工具列表
+
+#### 推荐的 MCP 工具
+
+- `context7`: 获取最新的库文档和代码示例
+- `github`: 管理仓库、PR 和 Issues
+- `filesystem`: 文件系统操作增强
+- `shell`: 命令行操作增强
+- `database`: 数据库操作工具
+
+### 代码提交前检查清单
+
+提交代码前必须执行以下检查：
+
+```bash
+# 1. 代码格式检查
+uv run ruff check
+uv run ruff format
+
+# 2. 运行测试
+uv run pytest
+
+# 3. 检查依赖更新
+uv sync
+```
+
+确保所有检查通过后再提交代码。
+

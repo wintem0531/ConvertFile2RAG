@@ -227,6 +227,7 @@ def test_split_workflow():
                 condition_count += 1
 
             # b. 统计框内文字识别到的数量，筛选小于2个字的框
+            # TODO: 如果只有一个字，应当生成识别结果的图片，再比较图像相似度
             text_length = len(text.strip()) if text else 0
             if text_length < 2:
                 condition_count += 1
