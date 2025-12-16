@@ -99,7 +99,7 @@ def test_mineru_image_analysis():
     print("=" * 60)
 
     # 测试图片路径
-    image_path = PROJECT_ROOT / "test_file/1.pdf2png/all_pages/齊系文字編_page_24.png"
+    image_path = PROJECT_ROOT / "test_file/1.pdf2png/all_pages/齊系文字編_page_25.png"
     output_dir = PROJECT_ROOT / "test_file/5.mineru"
 
     if not image_path.exists():
@@ -142,7 +142,7 @@ def test_mineru_image_analysis():
             pdf_file_names=[pdf_file_name],
             pdf_bytes_list=[pdf_bytes],
             p_lang_list=["ch"],
-            # backend="vlm-transformers",  # 使用 transformers 后端（支持 MPS 加速）
+            backend="vlm-mlx-engine",  # 使用 transformers 后端（支持 MPS 加速）
             parse_method="vlm",
             p_formula_enable=True,
             p_table_enable=True,
