@@ -96,11 +96,23 @@ def process_text_box_with_ocr(
         tmp_path = Path(tmp_file.name)
 
     try:
-        # 进行文字检测
-        boxes, _, _ = ocr_instance.detect_only(tmp_path)
+        # 进行文字检测（detect_only 会对图片缩放）
+        boxes, _, scale = ocr_instance.detect_only(tmp_path)
+        scale = scale or 1.0
+
+        # 将检测框坐标还原到原图尺度，避免截取偏移或截断
+        if scale != 1.0:
+            boxes = [
+                [[float(pt[0]) / scale, float(pt[1]) / scale] for pt in box]
+                for box in boxes
+            ]
 
         if not boxes:
-            # 没有检测到文字，保存整个图像
+            # 检测不到框，尝试直接整块识别一次
+            direct_text, direct_conf, _ = ocr_instance.recognize_text_only(image)
+            if direct_text and direct_text.strip() and direct_conf >= 0.35:
+                return direct_text.strip(), image_placeholders
+            # 仍无结果则回落为整体图像占位
             image_bytes = cv2.imencode(".png", image)[1].tobytes()
             image_hash = hashlib.md5(image_bytes).hexdigest()
             image_path = output_dir / f"{image_hash}.png"
@@ -117,12 +129,13 @@ def process_text_box_with_ocr(
             rect_box = convert_box_to_rect(box)
             x_min, y_min, x_max, y_max = rect_box
 
-            # 确保坐标在图像范围内
+            # 适当放大检测框，避免截断笔画
             h, w = image.shape[:2]
-            x_min = max(0, min(x_min, w - 1))
-            y_min = max(0, min(y_min, h - 1))
-            x_max = max(x_min + 1, min(x_max, w))
-            y_max = max(y_min + 1, min(y_max, h))
+            pad = max(2, int(0.02 * max(h, w)))
+            x_min = max(0, min(x_min - pad, w - 1))
+            y_min = max(0, min(y_min - pad, h - 1))
+            x_max = max(x_min + 1, min(x_max + pad, w))
+            y_max = max(y_min + 1, min(y_max + pad, h))
 
             cropped_image = image[y_min:y_max, x_min:x_max]
 
@@ -132,8 +145,14 @@ def process_text_box_with_ocr(
             # 进行OCR识别
             text, confidence, _ = ocr_instance.recognize_text_only(cropped_image)
 
+            # 置信度低时对整块再做一次兜底识别
+            if (not text or not text.strip()) or confidence < 0.35:
+                fallback_text, fallback_conf, _ = ocr_instance.recognize_text_only(image)
+                if fallback_text and fallback_text.strip() and fallback_conf >= 0.4:
+                    text, confidence = fallback_text, fallback_conf
+
             # 判断是否为图像（低置信度或无文字）
-            if not text or not text.strip() or confidence < 0.5:
+            if not text or not text.strip() or confidence < 0.35:
                 # 保存为图像
                 image_bytes = cv2.imencode(".png", cropped_image)[1].tobytes()
                 image_hash = hashlib.md5(image_bytes).hexdigest()
@@ -437,12 +456,9 @@ def main():
     """主函数 - 演示工作流"""
     print("\n🚀 PDF 分页处理工作流演示")
 
-    # 查找测试文件
-    test_dir = PROJECT_ROOT / "test_file"
+    # 查找测试文件（test_file/input 下的 pdf）
+    test_dir = PROJECT_ROOT / "test_file" / "input"
     test_files = list(test_dir.rglob("*.pdf"))[:1]
-
-    if not test_files:
-        test_files = list(test_dir.rglob("*.png"))[:1]
 
     if not test_files:
         print("❌ 未找到测试文件")
@@ -455,9 +471,9 @@ def main():
         process_pdf_page_workflow(
             pdf_input=test_file,
             output_dir=output_dir,
-            start_page=25,
-            end_page=25,  # 只处理第25页
-            min_pixels=10000,  # 使用默认阈值
+            start_page=1,
+            end_page=None,  # 处理全部页面
+            min_pixels=10000,
             lang="ch",
             backend="vlm-mlx-engine",
         )
