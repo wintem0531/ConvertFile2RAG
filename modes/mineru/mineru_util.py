@@ -7,8 +7,9 @@ import json
 import os
 import sys
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any
 
 # 获取项目根目录路径并添加到 Python 路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -20,6 +21,326 @@ try:
     from mineru.utils.enum_class import MakeMode
 except ImportError:
     raise ImportError("无法导入 MinerU 库，请确保已正确安装 MinerU")
+
+
+@dataclass
+class BoundingBox:
+    """边界框信息"""
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+    @property
+    def width(self) -> float:
+        return self.x1 - self.x0
+
+    @property
+    def height(self) -> float:
+        return self.y1 - self.y0
+
+    @property
+    def area(self) -> float:
+        return self.width * self.height
+
+
+@dataclass
+class ContentBlock:
+    """基础内容块"""
+    content: str
+    block_type: str  # text, image, table, equation, etc.
+    bbox: BoundingBox | None = None
+    page_idx: int = 0
+
+    def __str__(self) -> str:
+        return f"{self.block_type}: {self.content[:100]}{'...' if len(self.content) > 100 else ''}"
+
+
+@dataclass
+class TextBlock(ContentBlock):
+    """文本块"""
+    block_type: str = "text"
+    text_level: int = 0  # 文本级别（0=body, 1=header, etc.)
+
+    @property
+    def text(self) -> str:
+        return self.content
+
+
+@dataclass
+class ImageBlock(ContentBlock):
+    """图片块"""
+    block_type: str = "image"
+    img_path: str | None = None
+    caption: list[str] = field(default_factory=list)
+    footnote: list[str] = field(default_factory=list)
+
+    @property
+    def image_caption(self) -> list[str]:
+        return self.caption
+
+    @property
+    def image_footnote(self) -> list[str]:
+        return self.footnote
+
+
+@dataclass
+class TableBlock(ContentBlock):
+    """表格块"""
+    block_type: str = "table"
+    table_content: list[list[str]] | None = None
+    markdown: str | None = None
+
+    @property
+    def table_text(self) -> str:
+        if self.markdown:
+            return self.markdown
+        elif self.table_content:
+            return "\n".join([" | ".join(row) for row in self.table_content])
+        return self.content
+
+
+@dataclass
+class EquationBlock(ContentBlock):
+    """公式块"""
+    block_type: str = "equation"
+    latex: str | None = None
+
+    @property
+    def equation_text(self) -> str:
+        return self.latex or self.content
+
+
+@dataclass
+class MinerUOutput:
+    """MinerU 统一输出格式"""
+    blocks: list[ContentBlock] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        """按页面对块进行排序"""
+        self.blocks.sort(key=lambda x: (x.page_idx, x.bbox.y0 if x.bbox else 0))
+
+    @property
+    def text_blocks(self) -> list[TextBlock]:
+        """获取所有文本块"""
+        return [block for block in self.blocks if isinstance(block, TextBlock)]
+
+    @property
+    def image_blocks(self) -> list[ImageBlock]:
+        """获取所有图片块"""
+        return [block for block in self.blocks if isinstance(block, ImageBlock)]
+
+    @property
+    def table_blocks(self) -> list[TableBlock]:
+        """获取所有表格块"""
+        return [block for block in self.blocks if isinstance(block, TableBlock)]
+
+    @property
+    def equation_blocks(self) -> list[EquationBlock]:
+        """获取所有公式块"""
+        return [block for block in self.blocks if isinstance(block, EquationBlock)]
+
+    @property
+    def plain_text(self) -> str:
+        """获取纯文本"""
+        texts = []
+        for block in self.blocks:
+            if isinstance(block, TextBlock):
+                texts.append(block.text)
+            elif isinstance(block, ImageBlock) and block.caption:
+                texts.append(" ".join(block.caption))
+        return "\n\n".join(texts)
+
+    @property
+    def markdown(self) -> str:
+        """获取 Markdown 格式"""
+        md_parts = []
+        for block in self.blocks:
+            if isinstance(block, TextBlock):
+                if block.text_level > 0:
+                    md_parts.append("#" * block.text_level + " " + block.text)
+                else:
+                    md_parts.append(block.text)
+            elif isinstance(block, ImageBlock):
+                if block.img_path:
+                    md_parts.append(f"![Image]({block.img_path})")
+                if block.caption:
+                    md_parts.append(" ".join(block.caption))
+            elif isinstance(block, TableBlock) and block.markdown:
+                md_parts.append(block.markdown)
+            elif isinstance(block, EquationBlock):
+                md_parts.append(f"${block.equation_text}$")
+        return "\n\n".join(md_parts)
+
+    def get_blocks_by_page(self, page_idx: int) -> list[ContentBlock]:
+        """获取指定页面的所有块"""
+        return [block for block in self.blocks if block.page_idx == page_idx]
+
+    def add_block(self, block: ContentBlock):
+        """添加内容块"""
+        self.blocks.append(block)
+
+
+def _convert_content_list_to_blocks(content_list: list[dict]) -> MinerUOutput:
+    """将原始 content_list 转换为标准化的 MinerUOutput
+
+    Args:
+        content_list: MinerU 原始输出的 content_list
+
+    Returns:
+        MinerUOutput: 标准化的输出对象
+    """
+    output = MinerUOutput()
+
+    for item in content_list:
+        # 提取边界框
+        bbox = None
+        if "bbox" in item and item["bbox"]:
+            bbox_coords = item["bbox"]
+            if len(bbox_coords) >= 4:
+                bbox = BoundingBox(
+                    x0=float(bbox_coords[0]),
+                    y0=float(bbox_coords[1]),
+                    x1=float(bbox_coords[2]),
+                    y1=float(bbox_coords[3])
+                )
+
+        # 提取页码
+        page_idx = item.get("page_idx", 0)
+
+        # 根据类型创建不同的块
+        block_type = item.get("type", "text")
+
+        if block_type in ["text", "header", "page_number", "footnote"]:
+            # 创建文本块
+            text_level = item.get("text_level", 0)
+            if block_type == "header":
+                text_level = max(text_level, 1)  # 标题至少是 level 1
+
+            text_block = TextBlock(
+                content=item.get("text", ""),
+                bbox=bbox,
+                page_idx=page_idx,
+                text_level=text_level
+            )
+            output.add_block(text_block)
+
+        elif block_type == "image":
+            # 创建图片块
+            img_path = item.get("img_path", "")
+            image_block = ImageBlock(
+                content=img_path,
+                bbox=bbox,
+                page_idx=page_idx,
+                img_path=img_path,
+                caption=item.get("image_caption", []),
+                footnote=item.get("image_footnote", [])
+            )
+            output.add_block(image_block)
+
+        elif block_type == "table":
+            # 创建表格块
+            table_block = TableBlock(
+                content=item.get("text", ""),
+                bbox=bbox,
+                page_idx=page_idx,
+                markdown=item.get("table_caption", "")
+            )
+            output.add_block(table_block)
+
+        elif block_type == "equation":
+            # 创建公式块
+            equation_block = EquationBlock(
+                content=item.get("text", ""),
+                bbox=bbox,
+                page_idx=page_idx,
+                latex=item.get("latex", "")
+            )
+            output.add_block(equation_block)
+
+    return output
+
+
+def _convert_middle_json_to_blocks(middle_json: dict) -> MinerUOutput:
+    """将 middle_json 转换为标准化的 MinerUOutput
+
+    Args:
+        middle_json: MinerU 原始输出的 middle_json
+
+    Returns:
+        MinerUOutput: 标准化的输出对象
+    """
+    output = MinerUOutput()
+
+    # 提取页面信息
+    pages = middle_json.get("pages", [])
+
+    for page_idx, page_data in enumerate(pages):
+        # 处理每个块
+        blocks = page_data.get("blocks", [])
+
+        for block_data in blocks:
+            # 获取边界框
+            bbox = None
+            if "bbox" in block_data and block_data["bbox"]:
+                bbox_coords = block_data["bbox"]
+                if len(bbox_coords) >= 4:
+                    bbox = BoundingBox(
+                        x0=float(bbox_coords[0]),
+                        y0=float(bbox_coords[1]),
+                        x1=float(bbox_coords[2]),
+                        y1=float(bbox_coords[3])
+                    )
+
+            # 获取块类型
+            block_type = block_data.get("type", "text")
+
+            # 根据类型创建不同的块
+            if block_type in ["text", "title", "subtitle"]:
+                text_level = block_data.get("level", 0)
+                if block_type in ["title", "subtitle"]:
+                    text_level = text_level + 1
+
+                text_block = TextBlock(
+                    content=block_data.get("text", ""),
+                    bbox=bbox,
+                    page_idx=page_idx,
+                    text_level=text_level
+                )
+                output.add_block(text_block)
+
+            elif block_type == "image":
+                img_path = block_data.get("path", "")
+                image_block = ImageBlock(
+                    content=img_path,
+                    bbox=bbox,
+                    page_idx=page_idx,
+                    img_path=img_path,
+                    caption=block_data.get("captions", []),
+                    footnote=block_data.get("footnotes", [])
+                )
+                output.add_block(image_block)
+
+            elif block_type == "table":
+                table_block = TableBlock(
+                    content=block_data.get("text", ""),
+                    bbox=bbox,
+                    page_idx=page_idx,
+                    markdown=block_data.get("markdown", "")
+                )
+                output.add_block(table_block)
+
+            elif block_type == "equation":
+                equation_block = EquationBlock(
+                    content=block_data.get("text", ""),
+                    bbox=bbox,
+                    page_idx=page_idx,
+                    latex=block_data.get("latex", "")
+                )
+                output.add_block(equation_block)
+
+    return output
 
 
 def parse_pdf_to_content_list(
@@ -347,6 +668,110 @@ def save_middle_json_to_json(middle_json: dict, output_path: str | Path) -> None
 
 
 # 便捷函数：直接从 PDF 文件提取文本
+def parse_pdf(
+    pdf_path: str | Path,
+    page_range: tuple[int, int] | None = None,
+    output_dir: str | Path | None = None,
+    lang: str = "ch",
+    backend: str = "vlm-mlx-engine",
+    formula_enable: bool = True,
+    table_enable: bool = True,
+    return_format: str = "content_list",  # "content_list" or "middle_json"
+    **kwargs,
+) -> MinerUOutput:
+    """统一的 PDF 解析函数，支持不同后端并返回标准化的输出格式
+
+    Args:
+        pdf_path: PDF 文件路径或 Path 对象
+        page_range: 页面范围元组 (start_page, end_page)，None 表示全部页面
+        output_dir: 输出目录，None 表示使用临时目录
+        lang: 文档语言，默认为 "ch"（中文）
+        backend: 后端引擎 ("vlm-mlx-engine" 或 "pipeline")
+        formula_enable: 是否启用公式识别
+        table_enable: 是否启用表格识别
+        return_format: 返回格式 ("content_list" 或 "middle_json")
+        **kwargs: 其他传递给 do_parse 的参数
+
+    Returns:
+        MinerUOutput: 标准化的输出对象，包含所有解析的内容
+
+    Example:
+        >>> # 解析 PDF 并获取所有文本块
+        >>> output = parse_pdf("document.pdf")
+        >>> for text_block in output.text_blocks:
+        ...     print(text_block.text)
+        >>>
+        >>> # 获取所有图片
+        >>> for img_block in output.image_blocks:
+        ...     print(f"Image: {img_block.img_path}")
+        ...     print(f"Caption: {img_block.caption}")
+        >>>
+        >>> # 获取纯文本
+        >>> text = output.plain_text
+        >>>
+        >>> # 获取 Markdown 格式
+        >>> md = output.markdown
+    """
+    pdf_path = Path(pdf_path)
+
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF 文件不存在: {pdf_path}")
+
+    # 根据返回格式选择解析方法
+    if return_format == "content_list":
+        # 使用 content_list 格式解析
+        content_list = parse_pdf_to_content_list(
+            pdf_path=pdf_path,
+            page_range=page_range,
+            output_dir=output_dir,
+            lang=lang,
+            backend=backend,
+            formula_enable=formula_enable,
+            table_enable=table_enable,
+            **kwargs,
+        )
+        return _convert_content_list_to_blocks(content_list)
+
+    elif return_format == "middle_json":
+        # 使用 middle_json 格式解析
+        middle_json = parse_pdf_to_middle_json(
+            pdf_path=pdf_path,
+            page_range=page_range,
+            output_dir=output_dir,
+            lang=lang,
+            backend=backend,
+            formula_enable=formula_enable,
+            table_enable=table_enable,
+            **kwargs,
+        )
+        return _convert_middle_json_to_blocks(middle_json)
+
+    else:
+        raise ValueError(f"不支持的返回格式: {return_format}")
+
+
+def parse_pdf_simple(
+    pdf_path: str | Path,
+    backend: str = "vlm-mlx-engine",
+    **kwargs,
+) -> MinerUOutput:
+    """简化的 PDF 解析函数，使用默认参数解析 PDF
+
+    Args:
+        pdf_path: PDF 文件路径
+        backend: 后端引擎
+        **kwargs: 其他参数
+
+    Returns:
+        MinerUOutput: 标准化的输出对象
+    """
+    return parse_pdf(
+        pdf_path=pdf_path,
+        backend=backend,
+        **kwargs,
+    )
+
+
 def extract_text_from_pdf(
     pdf_path: str | Path,
     page_range: tuple[int, int] | None = None,
@@ -369,11 +794,17 @@ def extract_text_from_pdf(
     Returns:
         str: 提取的文本内容
     """
-    content_list = parse_pdf_to_content_list(
-        pdf_path=pdf_path, page_range=page_range, output_dir=output_dir, lang=lang, backend=backend, **kwargs
+    # 使用新的标准化解析函数
+    output = parse_pdf_simple(
+        pdf_path=pdf_path,
+        page_range=page_range,
+        output_dir=output_dir,
+        lang=lang,
+        backend=backend,
+        **kwargs,
     )
 
-    return extract_text_from_content_list(content_list)
+    return output.plain_text
 
 
 # 便捷函数：直接从 PDF 文件提取内容列表
@@ -385,8 +816,9 @@ def extract_content_list_from_pdf(
     backend: str = "vlm-mlx-engine",
     save_result: bool = False,
     save_path: str | Path | None = None,
+    return_standardized: bool = False,
     **kwargs,
-) -> list[dict]:
+) -> list[dict] | MinerUOutput:
     """
     直接从 PDF 文件提取内容列表
 
@@ -398,20 +830,67 @@ def extract_content_list_from_pdf(
         backend: 后端引擎，默认为 "vlm-mlx-engine"
         save_result: 是否保存结果到文件
         save_path: 结果保存路径，None 表示使用默认路径
+        return_standardized: 是否返回标准化的 MinerUOutput 对象
         **kwargs: 其他传递给 do_parse 的参数
 
     Returns:
-        List[Dict]: 内容列表
+        Union[List[Dict], MinerUOutput]: 内容列表或标准化的输出对象
     """
-    content_list = parse_pdf_to_content_list(
-        pdf_path=pdf_path, page_range=page_range, output_dir=output_dir, lang=lang, backend=backend, **kwargs
-    )
+    if return_standardized:
+        # 返回标准化的输出
+        output = parse_pdf_simple(
+            pdf_path=pdf_path,
+            page_range=page_range,
+            output_dir=output_dir,
+            lang=lang,
+            backend=backend,
+            **kwargs,
+        )
 
-    if save_result:
-        if save_path is None:
-            pdf_path = Path(pdf_path)
-            save_path = pdf_path.parent / f"{pdf_path.stem}_content_list.json"
+        if save_result:
+            # 如果需要保存，转换为原始格式并保存
+            content_list = []
+            for block in output.blocks:
+                item = {
+                    "type": block.block_type,
+                    "text": block.content,
+                    "page_idx": block.page_idx,
+                }
+                if block.bbox:
+                    item["bbox"] = [block.bbox.x0, block.bbox.y0, block.bbox.x1, block.bbox.y1]
 
-        save_content_list_to_json(content_list, save_path)
+                # 根据块类型添加特定字段
+                if isinstance(block, TextBlock):
+                    item["text_level"] = block.text_level
+                elif isinstance(block, ImageBlock):
+                    item["img_path"] = block.img_path
+                    item["image_caption"] = block.caption
+                    item["image_footnote"] = block.footnote
+                elif isinstance(block, TableBlock) and block.markdown:
+                    item["table_caption"] = block.markdown
+                elif isinstance(block, EquationBlock) and block.latex:
+                    item["latex"] = block.latex
 
-    return content_list
+                content_list.append(item)
+
+            if save_path is None:
+                pdf_path = Path(pdf_path)
+                save_path = pdf_path.parent / f"{pdf_path.stem}_content_list.json"
+
+            save_content_list_to_json(content_list, save_path)
+
+        return output
+    else:
+        # 返回原始格式
+        content_list = parse_pdf_to_content_list(
+            pdf_path=pdf_path, page_range=page_range, output_dir=output_dir, lang=lang, backend=backend, **kwargs
+        )
+
+        if save_result:
+            if save_path is None:
+                pdf_path = Path(pdf_path)
+                save_path = pdf_path.parent / f"{pdf_path.stem}_content_list.json"
+
+            save_content_list_to_json(content_list, save_path)
+
+        return content_list
